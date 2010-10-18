@@ -7,7 +7,7 @@ use NEXT;
 use KiokuDB;
 use KiokuDB::Backend::BDB::GIN;
 
-our $VERSION = '0.01';
+our $VERSION = '0.02';
 
 sub new { return bless {}, shift; }
 
@@ -25,19 +25,31 @@ sub setup_session {
                 backend => KiokuDB::Backend::BDB::GIN->new(manager => { home => $confSess->{kiokuDir}, create  => 1 }),
         );
     }
+    elsif ($confSess->{kiokuModel}) {
+        # This is a NOP - handled in get_kioku() below
+    }
     else {
         Catalyst::Exception->throw( 
-            message => "KiokuDB requires at least 'kiokuObject' or 'kiokuDir' to be set."
+            message => "KiokuDB requires at least 'kiokuObject', 'kiokuDir' or 'kiokuModel' (in conjunction with Catalyst::Model::KiokuDB) to be set."
         );
     }
-    $confSess->{kiokuScope} = $confSess->{kioku}->new_scope();
+
 }
 
+sub get_kioku {
+    my ($c) = @_;
+   
+    return $c->config->{session}->{kioku} ||
+        $c->model($c->config->{session}->{kiokuModel});
+}
+   
 sub get_session_data {
     my ($c, $key) = @_;
     
+    my $kioku = get_kioku($c);    
     my ($type, $id) = split ':', $key;
-    my $obj = $c->config->{session}->{kioku}->lookup($id) || return;
+    
+    my $obj = $kioku->lookup($id) || return;
     return $obj->expires if $type eq 'expires';
     return $obj->data;
 }
@@ -45,9 +57,10 @@ sub get_session_data {
 sub store_session_data {
     my ($c, $key, $data) = @_;
     
+    my $kioku = get_kioku($c);
     my ($type, $id) = split ':', $key;
     
-    if (my $obj = $c->config->{session}->{kioku}->lookup($id)) {
+    if (my $obj = $kioku->lookup($id)) {
         if ($type eq 'expires') {
             $obj->expires($data);
         }
@@ -55,16 +68,16 @@ sub store_session_data {
             $obj->flash(($type eq 'flash') ? 1 : 0);
             $obj->data($data);
         }
-        $c->config->{session}->{kioku}->store($obj); # no id means update
+        $kioku->store($obj); # no id means update
     }
     else {
         my $obj = Catalyst::Plugin::Session::Store::KiokuDB::Session->new(
-                        id      => $id,
-                        flash   => ($type eq 'flash') ? 1 : 0,
-                        expires => ($type eq 'expires') ? $data : undef,
-                        data    => ($type eq 'expires') ? {} : $data,
+            id      => $id,
+            flash   => ($type eq 'flash') ? 1 : 0,
+            expires => ($type eq 'expires') ? $data : undef,
+            data    => ($type eq 'expires') ? {} : $data,
         );
-        $c->config->{session}->{kioku}->store($id => $obj); # id means insert
+        $kioku->store($id => $obj); # id means insert
     }
     return;
 }
@@ -72,9 +85,13 @@ sub store_session_data {
 sub delete_session_data {
     my ($c, $key) = @_;
     
+    my $kioku = get_kioku($c);    
     my ($type, $id) = split ':', $key;
+
     return if $type eq 'expires';
-    $c->config->{session}->{kioku}->delete($id);
+
+    $kioku->delete($id);
+
     return;
 }
 
@@ -135,9 +152,11 @@ it does pretty much the very same things other session modules do.
 
 =head1 CONFIGURATION
 
-Under the C<session> key in your configuration parameters, you can use either
-of C<kiokuDir> which points to a directory in which KiokuDB will store its
-data, or C<kiokuObject> which allows you to reuse an existing KiokuDB instance.
+Under the C<session> key in your configuration parameters, you can use 
+C<kiokuDir> which points to a directory in which KiokuDB will store its
+data, C<kiokuObject> which allows you to reuse an existing KiokuDB instance
+or C<kiokuModel> which points the name of a C<Catalyst> model that must be
+of class L<Catalyst::Model::KiokuDB> (typically just 'kiokudb').
 
 =head1 METHODS
 
@@ -157,11 +176,24 @@ This one is currently a no-op.
 
 =head1 SEE ALSO
 
-L<Catalyst>, L<Catalyst::Plugin::Session>
+L<Catalyst>, L<Catalyst::Plugin::Session>, L<Catalyst::Model::KiokuDB>,
+L<KiokuX::Model>
 
-=head1 AUTHOR
+=head1 MODULE HOME PAGE
 
-Robin Berjon, <robin@berjon.com>, L<http://robineko.com/>
+L<http://github.com/mzedeler/Catalyst-Plugin-Session-Store-KiokuDB>.
+
+If you find a bug, please fork the master branch from Github, write a test
+case and push it to GitHub. After this, open an issue using Githubs issue
+tracker.
+
+=head1 MAINTAINER
+
+Michael Zedeler, <michael@zedeler.dk>.
+
+=head1 ORIGINAL AUTHOR
+
+Robin Berjon, <robin@berjon.com>, L<http://robineko.com/>.
 
 =head1 COPYRIGHT
 
